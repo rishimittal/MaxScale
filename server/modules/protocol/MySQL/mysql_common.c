@@ -1035,9 +1035,9 @@ bool read_complete_packet(DCB *dcb, GWBUF **readbuf)
         if (localbuf)
         {
             /** Store any extra data in the DCB's readqueue */
-            spinlock_acquire(&dcb->authlock);
+
             dcb->dcb_readqueue = gwbuf_append(dcb->dcb_readqueue, localbuf);
-            spinlock_release(&dcb->authlock);
+
         }
     }
 
@@ -1057,7 +1057,6 @@ bool gw_get_shared_session_auth_info(DCB* dcb, MYSQL_session* session)
     CHK_DCB(dcb);
     CHK_SESSION(dcb->session);
 
-    spinlock_acquire(&dcb->session->ses_lock);
 
     if (dcb->session->state != SESSION_STATE_ALLOC &&
         dcb->session->state != SESSION_STATE_DUMMY)
@@ -1072,7 +1071,7 @@ bool gw_get_shared_session_auth_info(DCB* dcb, MYSQL_session* session)
                   pthread_self(), dcb->session->state);
         rval = false;
     }
-    spinlock_release(&dcb->session->ses_lock);
+
     return rval;
 }
 
