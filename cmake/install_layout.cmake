@@ -54,12 +54,7 @@ set(MAXSCALE_CORE maxscale-common)
 # @param Name of the CMake target
 # @param Component where this executable should be included
 function(install_executable target component)
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(TARGETS ${target} DESTINATION ${MAXSCALE_BINDIR} COMPONENT "${component}")
-  endif()
-
 endfunction()
 
 # Installation function for modules
@@ -73,11 +68,7 @@ function(install_module target component)
     message(AUTHOR_WARNING "Module '${target}' is missing the VERSION parameter!")
   endif()
 
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
-    install(TARGETS ${target} DESTINATION ${MAXSCALE_LIBDIR} COMPONENT "${component}")
-  endif()
+  install(TARGETS ${target} DESTINATION ${MAXSCALE_LIBDIR} COMPONENT "${component}")
 
   # Make all modules dependent on the core
   add_dependencies(${target} ${MAXSCALE_CORE})
@@ -88,13 +79,7 @@ endfunction()
 # @param Script to install
 # @param Component where this script should be included
 function(install_script target component)
-
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
-    install(PROGRAMS ${target} DESTINATION ${MAXSCALE_BINDIR} COMPONENT "${component}")
-  endif()
-
+  install(PROGRAMS ${target} DESTINATION ${MAXSCALE_BINDIR} COMPONENT "${component}")
 endfunction()
 
 # Installation functions for files and programs. These all go to the share directory
@@ -104,19 +89,11 @@ endfunction()
 # @param Component where this file should be included
 function(install_file file component)
 
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(FILES ${file} DESTINATION ${MAXSCALE_SHAREDIR} COMPONENT "${component}")
-  endif()
 endfunction()
 
 function(install_program file component)
-
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(PROGRAMS ${file} DESTINATION ${MAXSCALE_SHAREDIR} COMPONENT "${component}")
-  endif()
 
 endfunction()
 
@@ -127,12 +104,7 @@ endfunction()
 # @param Component where this manual should be included
 function(install_manual file page component)
 
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(PROGRAMS ${file} DESTINATION ${CMAKE_INSTALL_DATADIR}/man/man${page} COMPONENT "${component}")
-  endif()
-
 endfunction()
 
 # Install headers
@@ -141,11 +113,7 @@ endfunction()
 # @param Component where this header should be included
 function(install_header header component)
 
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(FILES ${header} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/maxscale COMPONENT "${component}")
-  endif()
 
 endfunction()
 
@@ -157,10 +125,5 @@ endfunction()
 # @param Component where this file should be included
 function(install_custom_file file dest component)
 
-  list(FIND TARGET_COMPONENT ${component} BUILD_COMPONENT)
-
-  if(BUILD_COMPONENT GREATER -1 OR BUILD_ALL GREATER -1)
     install(FILES ${file} DESTINATION ${dest} COMPONENT "${component}")
-  endif()
-
 endfunction()
