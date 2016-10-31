@@ -672,6 +672,42 @@ gw_reply_on_error(DCB *dcb, mxs_auth_state_t state)
 }
 
 /**
+ * @brief Check if a reply can be routed to the client
+ *
+ * @param Backend DCB
+ * @return True if session is ready for reply routing
+ */
+static inline bool session_ok_to_route(DCB *dcb)
+{
+    bool rval = false;
+
+    if (dcb->session->state == SESSION_STATE_ROUTER_READY &&
+        dcb->session->client_dcb != NULL &&
+        dcb->session->client_dcb->state == DCB_STATE_POLLING &&
+        (dcb->session->router_session ||
+         service_get_capabilities(dcb->session->service) & RCAP_TYPE_NO_RSESSION))
+    {
+        MySQLProtocol *client_protocol = (MySQLProtocol *)dcb->session->client_dcb->protocol;
+
+        if (client_protocol)
+        {
+            CHK_PROTOCOL(client_protocol);
+
+            if (client_protocol->protocol_auth_state == MXS_AUTH_STATE_COMPLETE)
+            {
+                rval = true;
+            }
+        }
+        else if (dcb->session->client_dcb->dcb_role == DCB_ROLE_INTERNAL)
+        {
+            rval = true;
+        }
+    }
+
+    return rval;
+}
+
+/**
  * @brief With authentication completed, read new data and write to backend
  *
  * @param dcb           Descriptor control block for backend server
@@ -684,7 +720,7 @@ gw_read_and_write(DCB *dcb)
     GWBUF *read_buffer = NULL;
     SESSION *session = dcb->session;
     int nbytes_read;
-    int return_code;
+    int return_code = 0;
 
     CHK_SESSION(session);
 
@@ -717,28 +753,24 @@ gw_read_and_write(DCB *dcb)
             session->state = SESSION_STATE_STOPPING;
             spinlock_release(&session->ses_lock);
         }
-        return_code = 0;
-        goto return_rc;
+        return 0;
     }
 
     nbytes_read = gwbuf_length(read_buffer);
     if (nbytes_read == 0)
     {
         ss_dassert(read_buffer == NULL);
-        goto return_rc;
+        return return_code;
     }
     else
     {
         ss_dassert(read_buffer != NULL);
     }
 
-    if (nbytes_read < 3)
-    {
-        dcb->dcb_readqueue = read_buffer;
-        return_code = 0;
-        goto return_rc;
-    }
+    /** Ask what type of input the router/filter chain expects */
+    uint64_t capabilities = service_get_capabilities(session->service);
 
+    if (rcap_type_required(capabilities, RCAP_TYPE_STMT_INPUT))
     {
         GWBUF *tmp = modutil_get_complete_packets(&read_buffer);
         /* Put any residue into the read queue */
@@ -748,12 +780,24 @@ gw_read_and_write(DCB *dcb)
         if (tmp == NULL)
         {
             /** No complete packets */
-            return_code = 0;
-            goto return_rc;
+            return 0;
         }
-        else
+
+        read_buffer = tmp;
+
+        if (rcap_type_required(capabilities, RCAP_TYPE_CONTIGUOUS_INPUT))
         {
-            read_buffer = tmp;
+            if ((tmp = gwbuf_make_contiguous(read_buffer)))
+            {
+                read_buffer = tmp;
+            }
+            else
+            {
+                /** Failed to make the buffer contiguous */
+                gwbuf_free(read_buffer);
+                poll_fake_hangup_event(dcb);
+                return 0;
+            }
         }
     }
 
@@ -763,6 +807,7 @@ gw_read_and_write(DCB *dcb)
      */
     if (protocol_get_srv_command((MySQLProtocol *)dcb->protocol, false) != MYSQL_COM_UNDEFINED)
     {
+        ss_dassert(rcap_type_required(capabilities, RCAP_TYPE_STMT_INPUT));
         read_buffer = process_response_data(dcb, read_buffer, gwbuf_length(read_buffer));
         /**
          * Received incomplete response to session command.
@@ -770,64 +815,32 @@ gw_read_and_write(DCB *dcb)
          */
         if (!sescmd_response_complete(dcb))
         {
-            return_code = 0;
-            goto return_rc;
+            return 0;
         }
 
         if (!read_buffer)
         {
-            MXS_NOTICE("%lu [gw_read_backend_event] "
+            MXS_ERROR("%lu [gw_read_backend_event] "
                        "Read buffer unexpectedly null, even though response "
                        "not marked as complete. User: %s",
                        pthread_self(), dcb->session->client_dcb->user);
-            return_code = 0;
-            goto return_rc;
+            return 0;
         }
     }
-    /**
-     * Check that session is operable, and that client DCB is
-     * still listening the socket for replies.
-     */
-    if (dcb->session->state == SESSION_STATE_ROUTER_READY &&
-        dcb->session->client_dcb != NULL &&
-        dcb->session->client_dcb->state == DCB_STATE_POLLING &&
-        (session->router_session ||
-         service_get_capabilities(session->service) & RCAP_TYPE_NO_RSESSION))
+
+    if (session_ok_to_route(dcb))
     {
-        MySQLProtocol *client_protocol = (MySQLProtocol *)dcb->session->client_dcb->protocol;
-        if (client_protocol != NULL)
-        {
-            CHK_PROTOCOL(client_protocol);
-
-            if (client_protocol->protocol_auth_state == MXS_AUTH_STATE_COMPLETE)
-            {
-                gwbuf_set_type(read_buffer, GWBUF_TYPE_MYSQL);
-
-                session->service->router->clientReply(
-                    session->service->router_instance,
-                    session->router_session,
-                    read_buffer,
-                    dcb);
-                return_code = 1;
-            }
-        }
-        else if (dcb->session->client_dcb->dcb_role == DCB_ROLE_INTERNAL)
-        {
-            gwbuf_set_type(read_buffer, GWBUF_TYPE_MYSQL);
-            session->service->router->clientReply(
-                session->service->router_instance,
-                session->router_session,
-                read_buffer,
-                dcb);
-            return_code = 1;
-        }
+        gwbuf_set_type(read_buffer, GWBUF_TYPE_MYSQL);
+        session->service->router->clientReply(session->service->router_instance,
+                                              session->router_session,
+                                              read_buffer, dcb);
+        return_code = 1;
     }
     else /*< session is closing; replying to client isn't possible */
     {
         gwbuf_free(read_buffer);
     }
 
-return_rc:
     return return_code;
 }
 
